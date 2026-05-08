@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.user.cls-pipeline</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/Users/jintianyouyu/projects/cls-pipeline/scripts/run_daemon.sh</string>
+    </array>
+
+    <key>WorkingDirectory</key>
+    <string>/Users/jintianyouyu/projects/cls-pipeline</string>
+
+    <!-- 7*24:启动即跑,挂了自动重启 -->
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+
+    <!-- 防止疯狂重启:挂掉后等 30 秒再拉起 -->
+    <key>ThrottleInterval</key>
+    <integer>30</integer>
+
+    <!-- 让子进程拿到 keychain / 完整 user session -->
+    <key>SessionCreate</key>
+    <true/>
+
+    <!-- 资源上限:防止内存泄漏拖死系统 -->
+    <key>SoftResourceLimits</key>
+    <dict>
+        <key>NumberOfFiles</key>
+        <integer>1024</integer>
+    </dict>
+
+    <key>StandardOutPath</key>
+    <string>/Users/jintianyouyu/projects/cls-pipeline/logs/launchd-stdout.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/jintianyouyu/projects/cls-pipeline/logs/launchd-stderr.log</string>
+</dict>
+</plist>

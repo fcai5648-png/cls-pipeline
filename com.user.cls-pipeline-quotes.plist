@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.user.cls-pipeline-quotes</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/Users/jintianyouyu/projects/cls-pipeline/scripts/run_quotes.sh</string>
+    </array>
+    <key>WorkingDirectory</key>
+    <string>/Users/jintianyouyu/projects/cls-pipeline</string>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+    <key>ThrottleInterval</key>
+    <integer>60</integer>
+    <key>SessionCreate</key>
+    <true/>
+    <key>StandardOutPath</key>
+    <string>/Users/jintianyouyu/projects/cls-pipeline/logs/quotes-stdout.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/jintianyouyu/projects/cls-pipeline/logs/quotes-stderr.log</string>
+</dict>
+</plist>

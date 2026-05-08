@@ -1,0 +1,32 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+
+# 数据(运行时积累,新机器重新建)
+data/cls.db
+data/cls.db-wal
+data/cls.db-shm
+
+# 日志(运行时滚动,迁移不需要)
+logs/
+
+# Secrets / 个性化配置(不要入 git!)
+data/llm_config.json
+data/alert_config.json
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.idea/
+.vscode/
+*.swp
+
+# 临时 launchd 安装目录(plist 模板在项目根,这里是只读)
+*.tmp
