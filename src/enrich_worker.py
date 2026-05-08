@@ -94,8 +94,12 @@ def process_batch(store: Store, enricher, llm: LLMEnricher | None, scorer,
 
             merged = merge_rule_and_llm(rule_payload, llm_payload)
 
-            # 评分(基于 enrichment 结果 + pub_dt 时间衰减)
-            score, components = scorer.score(merged, row.get("pub_dt", ""))
+            # 评分(基于 enrichment 结果 + pub_dt 时间衰减 + cls 编辑精选 boost)
+            score, components = scorer.score(
+                merged,
+                row.get("pub_dt", ""),
+                is_highlight=bool(row.get("is_highlight", 0)),
+            )
 
             store.upsert_enrichment(
                 tid, merged, version,

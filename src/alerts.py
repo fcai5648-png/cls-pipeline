@@ -159,7 +159,8 @@ def format_alert(row: dict, viewer_url: str, quote_summary: list[str] | None = N
     content = row.get("content") or ""
 
     sent_emoji = {"positive": "🟢", "negative": "🔴", "neutral": "⚪"}.get(sentiment, "⚪")
-    head = f"🔥 {score:.0f} {sent_emoji}"
+    is_hl = bool(row.get("is_highlight"))
+    head = f"⭐头条 🔥 {score:.0f} {sent_emoji}" if is_hl else f"🔥 {score:.0f} {sent_emoji}"
     if sectors:
         head += " · " + " / ".join(sectors[:3])
 

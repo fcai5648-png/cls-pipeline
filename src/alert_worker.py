@@ -168,7 +168,18 @@ def main() -> int:
     while not _should_stop:
         cycle_start = time.monotonic()
         try:
+            # 普通阈值;头条电报阈值 -20(更低,更容易触发)
             candidates = store.fetch_alert_candidates(min_score=min_score, hours=lookback_hours, limit=20)
+            highlight_threshold = max(20.0, min_score - 20)
+            hl_candidates = store.fetch_alert_candidates(
+                min_score=highlight_threshold, hours=lookback_hours, limit=20, only_highlight=True
+            )
+            # 合并去重(highlight 可能跟 candidates 重叠)
+            seen_ids = {row["id"] for row in candidates}
+            for row in hl_candidates:
+                if row["id"] not in seen_ids:
+                    candidates.append(row)
+                    seen_ids.add(row["id"])
             for row in candidates:
                 if _should_stop: break
                 tid = row["id"]

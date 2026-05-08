@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import sqlite3
 import threading
 from contextlib import contextmanager
@@ -26,8 +27,10 @@ CREATE TABLE IF NOT EXISTS telegraph (
     content         TEXT    NOT NULL,
     content_hash    TEXT    NOT NULL UNIQUE,
     fetched_at      TEXT    NOT NULL,
-    raw_json        TEXT
+    raw_json        TEXT,
+    is_highlight    INTEGER NOT NULL DEFAULT 0     -- cls 编辑精选(头条)
 );
+-- idx_telegraph_highlight 索引在 _init_db() 里 ALTER 之后建,这里不能引用尚未 ALTER 上的列
 CREATE INDEX IF NOT EXISTS idx_telegraph_pub_dt    ON telegraph(pub_dt DESC);
 CREATE INDEX IF NOT EXISTS idx_telegraph_fetched   ON telegraph(fetched_at DESC);
 
@@ -126,9 +129,18 @@ def _ensure_columns(conn: sqlite3.Connection, table: str, columns: dict[str, str
             cur.execute(f"ALTER TABLE {table} ADD COLUMN {col} {ddl}")
 
 
+_BRACKETED_PREFIX = re.compile(r'^[【\[][^】\]]*[】\]]\s*')
+
+
 def make_hash(pub_dt: str, title: str, content: str) -> str:
-    # 内容前 300 字符够了 — 财联社偶尔会编辑标题但不太会改内容前段
-    payload = f"{pub_dt}|{title}|{content[:300]}".encode("utf-8")
+    """财联社去重:同一新闻常被推 2 次(短 title 简版 + 长 title 详版,或快讯+追加版)。
+    去掉【...】title 段后,只用正文前 100 字 hash:
+    - cls 电报都以"财联社 X 月 X 日电,"开头,真正内容差异在第 13 字起
+    - 100 字真实内容差异度足以区分不同新闻
+    - 同新闻不同版本前 100 字几乎必然撞 → dedupe
+    """
+    body = _BRACKETED_PREFIX.sub('', content or '').strip()
+    payload = f"{pub_dt}|{body[:100]}".encode("utf-8")
     return hashlib.sha1(payload).hexdigest()
 
 
@@ -154,7 +166,10 @@ class Store:
             cur.execute("PRAGMA synchronous=NORMAL")
             cur.execute("PRAGMA temp_store=MEMORY")
             cur.executescript(SCHEMA)
-            # 为已部署的 db 补加新列(LLM 集成升级 + 重要性评分)
+            # 为已部署的 db 补加新列
+            _ensure_columns(self._conn, "telegraph", {
+                "is_highlight": "INTEGER NOT NULL DEFAULT 0",
+            })
             _ensure_columns(self._conn, "telegraph_enrichment", {
                 "llm_called":               "INTEGER NOT NULL DEFAULT 0",
                 "llm_cost_usd":             "REAL NOT NULL DEFAULT 0.0",
@@ -164,6 +179,7 @@ class Store:
                 "scoring_version":          "TEXT",
             })
             cur.execute("CREATE INDEX IF NOT EXISTS idx_enrich_score ON telegraph_enrichment(importance_score DESC)")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_telegraph_highlight ON telegraph(is_highlight, pub_dt DESC)")
 
     def close(self) -> None:
         with self._lock:
@@ -183,12 +199,12 @@ class Store:
 
     def insert_batch(self, rows: Iterable[dict]) -> int:
         """rows: dict with keys pub_date, pub_time, title, content (raw row)。
-        返回新插入的条数(已去重)。"""
+        可选 _is_highlight=1 标记 cls 编辑精选(头条)。
+        返回新插入的条数;已存在但被新标记为 highlight 的会 upgrade(不算新条)。"""
         now_iso = datetime.now().isoformat(timespec="seconds")
         new_count = 0
         with self.transaction() as cur:
             for r in rows:
-                # akshare 可能返回 datetime.date / datetime.time 对象,统一 str()
                 pub_date = str(r.get("发布日期") or r.get("pub_date") or "").strip()
                 pub_time = str(r.get("发布时间") or r.get("pub_time") or "").strip()
                 title = str(r.get("标题") or r.get("title") or "").strip()
@@ -197,21 +213,28 @@ class Store:
                     continue
                 pub_dt = f"{pub_date} {pub_time}"
                 chash = make_hash(pub_dt, title, content)
+                is_highlight = 1 if r.get("_is_highlight") else 0
                 try:
                     cur.execute(
                         "INSERT INTO telegraph "
-                        "(pub_date, pub_time, pub_dt, title, content, content_hash, fetched_at, raw_json) "
-                        "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                        "(pub_date, pub_time, pub_dt, title, content, content_hash, fetched_at, raw_json, is_highlight) "
+                        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
                         (
                             pub_date, pub_time, pub_dt,
                             title, content, chash, now_iso,
                             json.dumps(r, ensure_ascii=False, default=str),
+                            is_highlight,
                         ),
                     )
                     new_count += 1
                 except sqlite3.IntegrityError:
-                    # 已存在,跳过
-                    pass
+                    # 已存在 — 如果新数据是重点,把已有的 upgrade(0→1,1→1 不变)
+                    if is_highlight:
+                        cur.execute(
+                            "UPDATE telegraph SET is_highlight = 1 "
+                            "WHERE content_hash = ? AND is_highlight = 0",
+                            (chash,),
+                        )
         return new_count
 
     def log_fetch(self, rows_returned: int, rows_new: int, duration_ms: int, error: Optional[str]) -> None:
@@ -440,13 +463,15 @@ class Store:
             return tuple(cur.fetchone())  # type: ignore
 
     # ---------- alerts ----------
-    def fetch_alert_candidates(self, min_score: float, hours: int, limit: int = 50) -> list[dict]:
-        """高分且未推过的电报。"""
+    def fetch_alert_candidates(self, min_score: float, hours: int, limit: int = 50,
+                               only_highlight: bool = False) -> list[dict]:
+        """高分且未推过的电报。only_highlight=True 时只看 cls 头条。"""
         with self._lock:
             cur = self._conn.cursor()
+            extra = "AND t.is_highlight = 1 " if only_highlight else ""
             cur.execute(
                 self._JOINED_SELECT
-                + "WHERE COALESCE(e.importance_score, 0) >= ? "
+                + f"WHERE COALESCE(e.importance_score, 0) >= ? {extra}"
                   "  AND t.pub_dt >= datetime('now', ?, 'localtime') "
                   "  AND NOT EXISTS (SELECT 1 FROM alert_log a WHERE a.telegraph_id = t.id) "
                   "ORDER BY e.importance_score DESC, t.pub_dt DESC LIMIT ?",
@@ -663,7 +688,7 @@ class Store:
             cur = self._conn.cursor()
             if version is None:
                 cur.execute(
-                    "SELECT t.id, t.title, t.content FROM telegraph t "
+                    "SELECT t.id, t.pub_dt, t.title, t.content, t.is_highlight FROM telegraph t "
                     "LEFT JOIN telegraph_enrichment e ON e.telegraph_id = t.id "
                     "WHERE e.telegraph_id IS NULL "
                     "ORDER BY t.id ASC LIMIT ?",
@@ -671,7 +696,7 @@ class Store:
                 )
             else:
                 cur.execute(
-                    "SELECT t.id, t.title, t.content FROM telegraph t "
+                    "SELECT t.id, t.pub_dt, t.title, t.content, t.is_highlight FROM telegraph t "
                     "LEFT JOIN telegraph_enrichment e ON e.telegraph_id = t.id "
                     "WHERE e.telegraph_id IS NULL OR e.enricher_version != ? "
                     "ORDER BY t.id ASC LIMIT ?",
@@ -684,7 +709,8 @@ class Store:
         "SELECT t.id, t.pub_dt, t.title, t.content, t.fetched_at, "
         "       e.sectors_json, e.companies_json, e.orgs_json, "
         "       e.event_types_json, e.sentiment, e.sentiment_score, "
-        "       e.importance_score, e.llm_called, e.llm_reasoning "
+        "       e.importance_score, e.llm_called, e.llm_reasoning, "
+        "       t.is_highlight "
         "FROM telegraph t LEFT JOIN telegraph_enrichment e ON e.telegraph_id = t.id "
     )
 
@@ -696,6 +722,7 @@ class Store:
             "title": row[2],
             "content": row[3],
             "fetched_at": row[4],
+            "is_highlight": bool(row[14]),
             "enrichment": None if row[5] is None else {
                 "sectors": json.loads(row[5]),
                 "companies": json.loads(row[6]),

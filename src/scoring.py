@@ -62,19 +62,19 @@ class Scorer:
         hours = (now - pub).total_seconds() / 3600
         return max(0.05, math.exp(-max(hours, 0) / 24))
 
-    def score(self, enrichment: dict, pub_dt: str, now: datetime | None = None) -> tuple[float, dict]:
-        """返回 (importance_score 0-100, components dict)。"""
+    HIGHLIGHT_BOOST = 15.0   # cls 编辑精选(头条)固定 +15 分
+
+    def score(self, enrichment: dict, pub_dt: str, now: datetime | None = None,
+              is_highlight: bool = False) -> tuple[float, dict]:
+        """返回 (importance_score 0-100, components dict)。
+        is_highlight=True 时(cls 编辑精选)在原始分上 +HIGHLIGHT_BOOST。"""
         sentiment_score = enrichment.get("sentiment_score") or 0.0
         event_types = enrichment.get("event_types") or []
         sectors = enrichment.get("sectors") or []
         companies = enrichment.get("companies") or []
 
         sentiment_part = abs(float(sentiment_score)) * 25.0   # 0-25
-
-        max_event_w = max(
-            (self.event_weights.get(e, 0.3) for e in event_types),
-            default=0.0,
-        )
+        max_event_w = max((self.event_weights.get(e, 0.3) for e in event_types), default=0.0)
         event_part = max_event_w * 35.0   # 0-35
 
         sector_hits = sum(1 for s in sectors if s in self.sectors)
@@ -85,20 +85,23 @@ class Scorer:
             + company_hits * self.weights["company_hit"],
         )
 
+        highlight_boost = self.HIGHLIGHT_BOOST if is_highlight else 0.0
         freshness = self._freshness(pub_dt, now)
-        raw = sentiment_part + event_part + watchlist_part
+        raw = sentiment_part + event_part + watchlist_part + highlight_boost
         final = min(100.0, raw * freshness)
 
         components = {
             "sentiment_part": round(sentiment_part, 1),
             "event_part": round(event_part, 1),
             "watchlist_part": round(watchlist_part, 1),
+            "highlight_boost": round(highlight_boost, 1),
             "raw": round(raw, 1),
             "freshness": round(freshness, 3),
             "final": round(final, 1),
             "sector_hits": sector_hits,
             "company_hits": company_hits,
             "max_event_w": round(max_event_w, 2),
+            "is_highlight": bool(is_highlight),
         }
         return round(final, 1), components
 

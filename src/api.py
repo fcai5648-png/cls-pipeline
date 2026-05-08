@@ -99,6 +99,9 @@ VIEWER_HTML = """<!DOCTYPE html>
   .score-badge.mid  { background: #ffb74d; color: #4e2700; }
   .score-badge.low  { background: #f5f5f5; color: #888; }
   .llm-mark { font-size: 11px; color: #1976d2; cursor: help; margin-left: 4px; }
+  .item.is-highlight { border-left-color: #ff9800 !important; background: #fff8e1; }
+  .hl-badge { display:inline-block; padding: 1px 6px; margin: 0 6px 0 0; font-size: 10px;
+              background: #ff9800; color: #fff; border-radius: 8px; font-weight: 600; cursor: help; }
   .title { font-weight: 600; color: #111; }
   .content { color: #444; font-size: 14px; margin-top: 3px; }
   .empty { color: #999; padding: 28px; text-align: center; }
@@ -414,9 +417,12 @@ async function load(manual) {
     const highScoreCls = score >= 60 ? ' high-score' : '';
     const llmMark = r.enrichment && r.enrichment.llm_called
       ? `<span class="llm-mark" title="${escapeAttr(r.enrichment.llm_reasoning || 'LLM 复抽过')}">🤖</span>` : '';
-    return `<div class="item ${sentClass}${isNew ? ' new' : ''}${highScoreCls}">
+    const isHl = !!r.is_highlight;
+    const hlClass = isHl ? ' is-highlight' : '';
+    const hlBadge = isHl ? '<span class="hl-badge" title="cls 编辑精选(头条)">⭐头条</span>' : '';
+    return `<div class="item ${sentClass}${isNew ? ' new' : ''}${highScoreCls}${hlClass}">
       <div class="item-head">
-        <div><span class="ts">${r.pub_dt}</span>${title ? `<span class="title">${hl(title)}</span>` : ''}${llmMark}</div>
+        <div><span class="ts">${r.pub_dt}</span>${hlBadge}${title ? `<span class="title">${hl(title)}</span>` : ''}${llmMark}</div>
         <span class="score-badge ${scoreCls}" title="重要性评分">${score.toFixed(0)}</span>
       </div>
       <div class="content">${hl(content)}</div>
