@@ -30,3 +30,9 @@ Thumbs.db
 
 # 临时 launchd 安装目录(plist 模板在项目根,这里是只读)
 *.tmp
+
+# 安全 — 任何打包文件都不入 git(防 secrets 泄露)
+*.zip
+*.tar.gz
+*.tgz
+data/*-secrets.*
